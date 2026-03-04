@@ -1,0 +1,291 @@
+---
+title: "RW_Group8"
+output: html_document
+date: "2026-02-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 5)
+library(arm)
+library(car)
+library(ggplot2)
+df <- read.csv("RWNS_final.csv", stringsAsFactors = FALSE)
+df <- subset(df, !is.na(ks4score))
+```
+
+#Explore the data using plots to analyse which categorical variabes can be merged 
+```{r}
+ggplot(df, aes(x = gender, y = ks4score, fill = gender)) +
+  geom_boxplot() +
+  labs(title = "KS4 Score Across Different Genders", x = "Gender", y = "KS4 Score") +
+  theme_minimal()
+
+# mother's education
+ggplot(df, aes(x = hiquamum, y = ks4score, fill = hiquamum)) +
+  geom_boxplot() +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  labs(title = "KS4 Score Based On Mother's Qualification Status", x = "Mother's Qualification", y = "KS4 Score") +
+  theme_minimal()
+
+# social economies class
+ggplot(df, aes(x = SECshort, y = ks4score, fill = SECshort)) +
+  geom_boxplot() +
+  labs(title = "KS4 Scores Across Different Social Classes", x = "SEC Category", y = "KS4 Score") +
+  theme_minimal()
+
+# computers
+ggplot(df, aes(x = computer, y = ks4score, fill = computer)) +
+  geom_boxplot() +
+  labs(title = " KS4 Score Across Home Computer Ownership", x = "Has Computer", y = "KS4 Score") +
+  theme_minimal()
+
+# school meals
+ggplot(df, aes(x = fsm, y = ks4score, fill = fsm)) +
+  geom_boxplot() +
+  labs(title = "KS4 Score Across Free School Meal Status", x = "FSM Entitled", y = "KS4 Score") +
+  theme_minimal()
+
+# attitude
+ggplot(df, aes(x = attitude, y = ks4score, fill = fsm)) +
+  geom_boxplot() +
+  labs(title = "KS4 Score Across different attitudes", x = "Attitudes", y = "KS4 Score") +
+  theme_minimal()
+
+# homework
+ggplot(df, aes(x = homework, y = ks4score, fill = fsm)) +
+  geom_boxplot() +
+  labs(title = "KS4 Score Across different homework status", x = "Homework", y = "KS4 Score") +
+  theme_minimal()
+
+```
+
+#Convert missing strings to explicit level
+```{r}
+for (v in c("gender","singlepar","house","fsm","computer","pupasp",
+            "parasp","truancy","absent","exclude","sen","tuition","SECshort","hiquamum")) {
+  x <- as.character(df[[v]])
+  x[x %in% c("-1","-9","missing")] <- "Missing"
+  df[[v]] <- factor(x)
+}
+```
+
+
+#Combine the variables we analyzed and take highly correlated variables into consideration
+```{r eda_cor}
+## Confirms high correlation between KS3 subscores -> justifies using ks3_mean
+cor(df[, c("k3en","k3ma","k3sc")], use = "complete.obs")
+```
+
+```{r load}
+
+## Combine KS3 subscores into one mean (k3en/k3ma/k3sc are highly correlated)
+df$ks3_mean <- rowMeans(df[, c("k3en", "k3ma", "k3sc")], na.rm = TRUE)
+#Combine mother's qualification
+df$mum_edu3 <- as.character(df$hiquamum) 
+df$mum_edu3[grepl("Degree|HE", df$hiquamum, ignore.case = TRUE)] <- "Degree/HE"
+df$mum_edu3[grepl("None|Other|missing", df$hiquamum, ignore.case = TRUE)] <- "None/Other/Missing"
+df$mum_edu3 <- factor(df$mum_edu3) 
+
+#social status combine
+df$sec3 <- as.character(df$SECshort)
+df$sec3[grepl("Routine|missing", df$SECshort, ignore.case = TRUE)] <- "Lower/Missing"
+df$sec3[grepl("Managerial", df$SECshort, ignore.case = TRUE)] <- "Professional"
+df$sec3[grepl("Intermediate", df$SECshort, ignore.case = TRUE)] <- "Intermediate"
+df$sec3 <- factor(df$sec3)
+  
+## attitude: merge 4 levels into 2
+df$attitude3 <- ifelse(df$attitude %in% c("very_high", "high"), "high",
+                ifelse(df$attitude %in% c("low", "very_low"), "low", "Missing"))
+df$attitude3 <- factor(df$attitude3, levels = c("high", "low", "Missing"))
+
+## homework: merge 6 levels into 3
+df$homework3 <- ifelse(df$homework %in% c("none", "1_evening"),       "0-1",
+                ifelse(df$homework %in% c("2_evenings", "3_evenings"), "2-3",
+                ifelse(df$homework %in% c("4_evenings", "5_evenings"), "4-5",
+                "Missing")))
+df$homework3 <- factor(df$homework3, levels = c("0-1", "2-3", "4-5", "Missing"))
+
+
+## Set reference levels
+df$gender    <- relevel(df$gender,    ref = "Female")
+df$singlepar <- relevel(df$singlepar, ref = "no")
+df$house     <- relevel(df$house,     ref = "owned")
+df$fsm <- as.character(df$fsm)
+df$fsm[df$fsm == "Missing"] <- "no"
+df$fsm <- relevel(factor(df$fsm), ref = "no")
+df$truancy   <- relevel(df$truancy,   ref = "No")
+df$absent    <- relevel(df$absent,    ref = "No")
+df$exclude   <- relevel(df$exclude,   ref = "No")
+df$sen       <- relevel(df$sen,       ref = "No")
+df$pupasp    <- relevel(df$pupasp,    ref = "Yes")
+df$parasp    <- relevel(df$parasp,    ref = "Yes")
+df$sec3      <- relevel(df$sec3,      ref = "Professional")
+df$mum_edu3  <- relevel(df$mum_edu3,  ref = "Degree/HE")
+```
+
+# 2. Exploratory Data Analysis
+```{r eda_scatter}
+with(df, plot(ks3_mean, ks4score,
+              pch = 16, cex = 0.3, col = rgb(0,0,0,0.2),
+              xlab = "Mean KS3 level", ylab = "KS4 score",
+              main = "KS4 vs KS3 mean"))
+abline(lm(ks4score ~ ks3_mean, data = df), col = "red")
+```
+
+
+#Boxplot after merging and remove missing values
+```{r eda_boxplots, fig.height=9}
+par(mfrow = c(3, 3))
+boxplot(ks4score ~ gender,    data = df, main = "Gender",             ylab = "KS4 score")
+boxplot(ks4score ~ SECshort,  data = df, main = "Parental SEC",       ylab = "KS4 score", las=2, cex.axis=0.6)
+boxplot(ks4score ~ mum_edu3,  data = df, main = "Mother's qual",      ylab = "KS4 score", las=2, cex.axis=0.6)
+boxplot(ks4score ~ fsm,       data = df, main = "Free school meal",   ylab = "KS4 score")
+boxplot(ks4score ~ attitude3, data = df, main = "Attitude to school", ylab = "KS4 score")
+boxplot(ks4score ~ homework3, data = df, main = "Homework frequency", ylab = "KS4 score")
+boxplot(ks4score ~ truancy,   data = df, main = "Truancy",            ylab = "KS4 score")
+boxplot(ks4score ~ sen,       data = df, main = "SEN",                ylab = "KS4 score")
+boxplot(ks4score ~ pupasp,    data = df, main = "Pupil aspiration",   ylab = "KS4 score")
+boxplot(ks4score ~ sec3,    data = df, main = "Economic and social status",   ylab = "KS4 score")
+par(mfrow = c(1, 1))
+```
+
+# 3. Regression Analysis
+## Full model
+```{r full_model}
+m_full <- lm(ks4score ~ ks3_mean + gender + singlepar + house + IDACI_n +
+               computer + pupasp + parasp + attitude3 + homework3 +
+               truancy + absent + exclude + sen +
+               fsm + SECshort + hiquamum + tuition,
+             data = df)
+display(m_full)
+summary(m_full)
+```
+
+## Backward elimination
+```{r backward}
+## Remove non-significant predictors one group at a time (p > 0.05)
+## Step 1: remove 'computer' - all levels non-significant
+m1 <- update(m_full, . ~ . - computer)
+
+## Step 2: remove 'tuition' - non-significant
+m2 <- update(m1, . ~ . - tuition)
+
+## Step 3: remove 'absent' - non-significant once other factors controlled
+m3 <- update(m2, . ~ . - absent)
+
+## Step 4: remove 'singlepar' - non-significant once SEC and house included
+m4 <- update(m3, . ~ . - singlepar)
+
+## Step 5: remove 'SECshort' - all levels non-significant (p > 0.3)
+m_final <- update(m4, . ~ . - SECshort)
+
+display(m_final)
+summary(m_final)
+```
+
+#check the r^2 value
+```{r}
+get_diag <- function(model, name) {
+  cat("\n--- Diagnostics for", name, "---\n")
+  cat("Adj R-squared:", summary(model)$adj.r.squared, "\n")
+  cat("AIC:", AIC(model), "\n")
+}
+
+get_diag(m_full, "Full Model")
+
+## Step 1: remove 'computer'
+m1 <- update(m_full, . ~ . - computer)
+get_diag(m1, "m1 (removed computer)")
+
+## Step 2: remove 'tuition' 
+m2 <- update(m1, . ~ . - tuition)
+get_diag(m2, "m2 (removed tuition)")
+
+## Step 3:remove 'absent'
+m3 <- update(m2, . ~ . - absent)
+get_diag(m3, "m3 (removed absent)")
+
+## Step 4:remove 'singlepar' 
+m4 <- update(m3, . ~ . - singlepar)
+get_diag(m4, "m4 (removed singlepar)")
+
+## Step 5: remove 'SECshort'
+m_final <- update(m4, . ~ . - SECshort)
+get_diag(m_final, "Final Model")
+
+
+summary(m_final)
+
+par(mfrow = c(2, 2))
+plot(m_final)
+par(mfrow = c(1, 1))
+```
+
+
+# 4. Diagnostics
+
+```{r diagnostics, fig.height=6}
+par(mfrow = c(2, 2))
+plot(m_final)
+par(mfrow = c(1, 1))
+```
+
+```{r outliers}
+show_outliers <- function(the.linear.model, topN) {
+  n <- length(fitted(the.linear.model))
+  p <- length(coef(the.linear.model))
+  res.out    <- which(abs(rstandard(the.linear.model)) > 3)
+  res.top    <- head(rev(sort(abs(rstandard(the.linear.model)))), topN)
+  lev.out    <- which(lm.influence(the.linear.model)$hat > 2*p/n)
+  lev.top    <- head(rev(sort(lm.influence(the.linear.model)$hat)), topN)
+  dffits.out <- which(abs(dffits(the.linear.model)) > 2*sqrt(p/n))
+  dffits.top <- head(rev(sort(abs(dffits(the.linear.model)))), topN)
+  cooks.out  <- which(cooks.distance(the.linear.model) > 1)
+  cooks.top  <- head(rev(sort(cooks.distance(the.linear.model))), topN)
+  list(Std.res=res.out, Std.res.top=res.top,
+       Leverage=lev.out, Leverage.top=lev.top,
+       DFFITS=dffits.out, DFFITS.top=dffits.top,
+       Cooks=cooks.out, Cooks.top=cooks.top)
+}
+
+out_stats <- show_outliers(m_final, 5)
+out_stats
+Reduce(intersect, list(out_stats$Std.res, out_stats$DFFITS, out_stats$Leverage))
+```
+
+```{r vif}
+vif(m_final)
+```
+
+# 5. Results Table
+
+```{r results_table}
+coefs <- summary(m_final)$coefficients
+ci    <- confint(m_final)
+
+results <- data.frame(
+  Predictor = rownames(coefs),
+  Estimate  = round(coefs[,"Estimate"],   2),
+  SE        = round(coefs[,"Std. Error"], 2),
+  CI_low    = round(ci[,1], 2),
+  CI_high   = round(ci[,2], 2),
+  p_value   = round(coefs[,"Pr(>|t|)"],  3)
+)
+
+knitr::kable(results,
+             col.names = c("Predictor","Estimate","Std. Error",
+                           "95% CI (low)","95% CI (high)","p-value"),
+             caption = "Final model coefficients",
+             row.names = FALSE)
+
+s <- summary(m_final)
+cat(sprintf("R-squared: %.3f | Adj R-squared: %.3f | Residual SD: %.2f | N: %d\n",
+            s$r.squared, s$adj.r.squared, s$sigma, nrow(df)))
+```
+
+
+```{r}
+summary(m_final)
+vif(m_final)
+```
